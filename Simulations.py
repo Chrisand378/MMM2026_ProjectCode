@@ -17,9 +17,9 @@ SUBFOLDERS = [
 
 N_SIMULATIONS = 300
 
-# Use None if you want new random results every time you run the script.
-# Use an integer, e.g. 123, if you want reproducible results.
-RANDOM_SEED = None
+
+
+RANDOM_SEED = NONE
 
 ROW_ID_COL = "_row_id"
 EDUCATION_COL = "education_level"
@@ -29,13 +29,9 @@ CHOSEN_COL = "chosen"
 INCOME_COL = "expected_lifetime_income"
 STUDY_DIFFICULTY_COL = "study_difficulty"
 
-# Your income variable appears to be in DKK.
-# Dividing by 1,000,000 gives income in millions of DKK, like in your table.
+# Income variable in DKK -- dividing by 1,000,000 gives income in millions of DKK
 INCOME_DIVISOR = 1_000_000
 
-# This file can become very large because it has:
-# n_simulations × n_individuals rows.
-# The table-by-run files below are usually enough for the tables.
 SAVE_INDIVIDUAL_SIMULATIONS = False
 
 DATASET_LABELS = {

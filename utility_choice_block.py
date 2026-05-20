@@ -9,17 +9,6 @@ from config import MODEL_EDUCATION_COL
 from model_utils import print_model_summary, safe_log, standardize
 
 
-# Specification in this version:
-# - Keep alternative-specific constants for education alternatives.
-# - Remove unemployment_rate from the utility function.
-#
-# Reason: unemployment_rate is fixed by education alternative. If we include both
-# alternative constants and unemployment_rate, the unemployment coefficient is not
-# separately identified from the alternative constants.
-INCLUDE_ALT_CONSTANTS = True
-INCLUDE_UNEMPLOYMENT_RATE = False
-
-
 #%%
 @dataclass
 class ConditionalLogitResult:
@@ -55,7 +44,7 @@ def prepare_choice_data(choice_long):
     data["z_log_expected_income"] = standardize(data["log_expected_income"])
     data["z_study_difficulty"] = standardize(data["study_difficulty"])
 
-    # Alternative constants. We drop the first education level as reference.
+    # Alternative constants
     # Do not add a global intercept in ConditionalLogit.
     alternative_dummies = pd.get_dummies(
         data[MODEL_EDUCATION_COL].astype("category"),
@@ -76,7 +65,6 @@ def prepare_choice_data(choice_long):
 
 
 def _estimation_sample(data, x):
-    """Keep rows with complete data and groups with exactly one chosen row."""
     model_data = pd.concat(
         [
             data[["_row_id", "chosen", MODEL_EDUCATION_COL]].copy(),
@@ -87,20 +75,10 @@ def _estimation_sample(data, x):
 
     model_data["chosen"] = model_data["chosen"].astype(int)
 
-    chosen_per_group = model_data.groupby("_row_id")["chosen"].sum()
-    valid_groups = chosen_per_group[chosen_per_group == 1].index
-    model_data = model_data[model_data["_row_id"].isin(valid_groups)].copy()
-
-    if model_data.empty:
-        raise ValueError("No valid choice sets remain after dropping missing values.")
-
-    alternatives_per_group = model_data.groupby("_row_id")[MODEL_EDUCATION_COL].nunique()
-    if (alternatives_per_group < 2).any():
-        raise ValueError("Each valid choice set must contain at least two alternatives.")
-
     y = model_data["chosen"]
     groups = model_data["_row_id"]
     x_used = model_data[x.columns].astype(float)
+
     return model_data, y, x_used, groups
 
 
@@ -108,9 +86,6 @@ def _estimation_sample(data, x):
 def estimate_utility_choice_model(choice_long):
     """
     Estimate the utility-choice block with statsmodels ConditionalLogit.
-
-    This replaces the hand-written log-likelihood, custom BFGS optimizer, and
-    numerical Hessian from the original utility block.
     """
     data, x = prepare_choice_data(choice_long)
     model_data, y, x_used, groups = _estimation_sample(data, x)
@@ -119,10 +94,7 @@ def estimate_utility_choice_model(choice_long):
     result = model.fit(method="bfgs", disp=False, maxiter=1000)
 
     coefficients = pd.Series(result.params, index=x_used.columns)
-    try:
-        standard_errors = pd.Series(result.bse, index=x_used.columns)
-    except Exception:
-        standard_errors = pd.Series(np.nan, index=x_used.columns)
+    standard_errors = pd.Series(result.bse, index=x_used.columns)
 
     mle_retvals = getattr(result, "mle_retvals", {}) or {}
     converged = bool(mle_retvals.get("converged", True))

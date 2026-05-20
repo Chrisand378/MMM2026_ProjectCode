@@ -17,28 +17,12 @@ LABOR_MARKET_ENTRY_TABLE = "LaborMarketEntry_data"
 
 #%%
 # Core variable names in the individual-level dataset.
-ID_COL = "pnr"
 EDUCATION_COL = "e_udd"
-TRANSFORMED_EDUCATION_COL = "f_udd_t"
 MODEL_EDUCATION_COL = "education_level"
 WAGE_COL = "timelon"
 LOG_WAGE_COL = "log_timelon"
 AGE_COL = "alder"
 EXPERIENCE_COL = "exp"
-
-# Ability is intentionally excluded in this first code version.
-# If you later want to include an estimated ability proxy, add its column here.
-ABILITY_COLS = []
-
-# Variables that must never be used as regressors in this version.
-FORBIDDEN_MODEL_COLS = [
-    "persamlinknetrent_ny",
-    "aar",
-    "induagg",
-    "i_udd",
-    "labstatus",
-    "arledgr",
-]
 
 # Background variables used in the model.
 CATEGORICAL_BACKGROUND_COLS = [
@@ -81,12 +65,6 @@ UNEMPLOYMENT_RATES = {
 }
 
 # Ordered broad education levels in the choice set.
-EDUCATION_LEVELS = [0, 1, 2, 3, 4]
-
-
-#%%
-def existing_background_cols(data):
-    """Return configured raw background columns that are actually present."""
-    return [col for col in BACKGROUND_COLS if col in data.columns]
+EDUCATION_LEVELS = [1, 2, 3, 4]
 
 # %%

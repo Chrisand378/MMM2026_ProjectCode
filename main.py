@@ -4,16 +4,16 @@ from config import (
     LABOR_MARKET_ENTRY_PATH,
     LABOR_MARKET_ENTRY_TABLE,
 )
-from income_block_EducationReg_no_smearing_benefits import (
+from income_block_EducationReg import (
     add_expected_income_by_choice,
     estimate_income_model,
 )
 from model_utils import load_individual_csv, load_named_excel_table, print_model_summary
-from study_difficulty_block_statsmodels import (
+from study_difficulty_block import (
     add_study_difficulty_to_long,
     estimate_study_difficulty_model,
 )
-from utility_choice_block_statsmodels_alt_constants_only import (
+from utility_choice_block import (
     estimate_utility_choice_model,
     predict_choice_probabilities,
 )

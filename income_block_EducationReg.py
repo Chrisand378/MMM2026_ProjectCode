@@ -19,15 +19,12 @@ from config import (
     UNEMPLOYMENT_RATES,
 )
 from model_utils import (
-    assert_no_forbidden_regressors,
     build_background_regressors,
     fit_ols,
     load_individual_csv,
     load_named_excel_table,
-    normalize_labor_market_entry,
     preprocess_individual_data,
-    print_model_summary,
-    require_columns,
+    print_model_summary
 )
 
 
@@ -104,7 +101,6 @@ def prepare_income_data(data):
     The dependent variable is log_timelon, created from timelon.
     """
     data = preprocess_individual_data(data, require_wage=True)
-    require_columns(data, [MODEL_EDUCATION_COL, AGE_COL, EXPERIENCE_COL, LOG_WAGE_COL], "income data")
 
     if AGE_COL in data.columns:
         data["age_sq"] = data[AGE_COL] ** 2
@@ -117,15 +113,11 @@ def prepare_income_data(data):
 def income_regressors(data):
     """
     Build regressors for the education-specific log-wage equations.
-
-    Education dummies are intentionally excluded here, because estimate_income_model()
-    estimates one separate OLS regression for each broad education level.
     """
     profile_cols = [AGE_COL, "age_sq", EXPERIENCE_COL, "experience_sq"]
     background = build_background_regressors(data)
 
     x = pd.concat([data[profile_cols].astype(float), background], axis=1)
-    assert_no_forbidden_regressors(x.columns)
     return x
 
 
@@ -136,9 +128,6 @@ def estimate_income_model(data):
 
     For each g:
         log(timelon) = age profile + experience profile + background variables + error.
-
-    The returned IncomeModelResult preserves the high-level structure: downstream
-    code can still pass income_result into add_expected_income_by_choice().
     """
     data = prepare_income_data(data)
     x_all = income_regressors(data)
@@ -166,21 +155,9 @@ def estimate_income_model(data):
 
 
 #%%
-def _education_result(education_level, income_result):
-    """Select the OLS result for a broad education level."""
-    education_level = int(education_level)
-    if education_level not in income_result.results_by_education:
-        available = sorted(income_result.results_by_education)
-        raise ValueError(
-            f"No income model estimated for education level {education_level}. "
-            f"Available levels are {available}."
-        )
-    return income_result.results_by_education[education_level]
-
-
 def predict_log_wage_for_alternative(row, education_level, income_result):
     """Predict log hourly wage for one person and one broad education level."""
-    result = _education_result(education_level, income_result)
+    result = income_result.results_by_education[int(education_level)]
     values = {}
 
     for name in result.coefficients.index:
@@ -208,28 +185,7 @@ def predict_expected_hourly_wage_for_alternative(row, education_level, income_re
 
 
 def discount_origin_age(labor_market_entry):
-    """
-    Return the common discount origin age.
-
-    The discount origin is the labor-market entry age for education level 1
-    if education level 1 is available. Otherwise, it is the minimum entry age
-    in the labor-market-entry table.
-    """
-    entry = pd.Series(labor_market_entry).copy()
-    try:
-        entry.index = entry.index.astype(int)
-    except Exception:
-        pass
-
-    if 1 in entry.index:
-        return int(entry.loc[1])
-    return int(entry.min())
-
-
-# Backwards-compatible name used in earlier versions.
-def common_discount_start_age(labor_market_entry):
-    return discount_origin_age(labor_market_entry)
-
+    return int(labor_market_entry.loc[1])
 
 def discount_factor_for_age(age, discount_start_age):
     """Discount factor for an annual income flow at a given age."""
@@ -246,7 +202,7 @@ def annual_income_with_unemployment_benefits(expected_hourly_wage, education_lev
 
     where b is the unemployment benefit replacement rate.
     """
-    unemployment = float(UNEMPLOYMENT_RATES.get(int(education_level), 0.0))
+    unemployment = float(UNEMPLOYMENT_RATES[int(education_level)])
     return float(
         ANNUAL_HOURS
         * (
@@ -256,36 +212,6 @@ def annual_income_with_unemployment_benefits(expected_hourly_wage, education_lev
     )
 
 
-
-
-def valid_income_alternatives(labor_market_entry, income_result=None):
-    """
-    Return education alternatives that should enter the income and choice blocks.
-
-    The labor-market-entry table may contain education level 0 from an older
-    setup. In the corrected config, unemployment rates are only defined for the
-    valid choice alternatives. Therefore we keep the intersection between the
-    labor-market-entry table and UNEMPLOYMENT_RATES.
-
-    For the education-specific regression version, we additionally require that
-    an income model was actually estimated for the alternative.
-    """
-    entry_levels = set(pd.Index(labor_market_entry.index).astype(int))
-    unemployment_levels = {int(level) for level in UNEMPLOYMENT_RATES.keys()}
-    alternatives = entry_levels.intersection(unemployment_levels)
-
-    if income_result is not None and hasattr(income_result, "results_by_education"):
-        model_levels = {int(level) for level in income_result.results_by_education.keys()}
-        alternatives = alternatives.intersection(model_levels)
-
-    alternatives = sorted(alternatives)
-    if not alternatives:
-        raise ValueError(
-            "No valid income alternatives remain after matching the labor-market-entry "
-            "table to UNEMPLOYMENT_RATES. Check that education levels use the same coding."
-        )
-    return alternatives
-
 def expected_discounted_income(row, education_level, income_result, labor_market_entry):
     """
     Calculate expected discounted lifetime labor income for one alternative.
@@ -294,8 +220,7 @@ def expected_discounted_income(row, education_level, income_result, labor_market
         annual income = H * (1 - u_g) * w_hat + H * u_g * b * w_hat.
 
     The discount origin is the entry age of education level g=1 for all education
-    alternatives. This gives longer educations a true delay penalty relative to the
-    earliest labor-market-entry age.
+    alternatives.
     """
     education_level = int(education_level)
     entry_age = int(labor_market_entry.loc[education_level])
@@ -323,9 +248,8 @@ def expected_discounted_income(row, education_level, income_result, labor_market
 def add_expected_income_by_choice(data, income_result, labor_market_entry_df):
     """Return a long person-alternative dataset with expected income."""
     data = preprocess_individual_data(data, require_wage=False)
-    labor_market_entry_df = normalize_labor_market_entry(labor_market_entry_df)
     labor_market_entry = labor_market_entry_df.set_index(MODEL_EDUCATION_COL)["LaborMarketEntry"]
-    alternatives = valid_income_alternatives(labor_market_entry, income_result)
+    alternatives = [1, 2, 3, 4]
     rows = []
 
     for obs_id, row in data.iterrows():
@@ -341,7 +265,7 @@ def add_expected_income_by_choice(data, income_result, labor_market_entry_df):
                         income_result,
                         labor_market_entry,
                     ),
-                    "unemployment_rate": float(UNEMPLOYMENT_RATES.get(int(education_level), 0.0)),
+                    "unemployment_rate": float(UNEMPLOYMENT_RATES[int(education_level)]),
                     "unemployment_benefit_replacement_rate": UNEMPLOYMENT_BENEFIT_REPLACEMENT_RATE,
                 }
             )
@@ -352,13 +276,10 @@ def add_expected_income_by_choice(data, income_result, labor_market_entry_df):
 #%%
 def mean_annual_income_profile(data, income_result, labor_market_entry_df):
     """
-    Build the mean annual income profile used for diagnostic plots.
+    Build the mean annual income profile
 
-    This version is adapted to the education-specific OLS model. It includes
-    unemployment benefits but not SU or any study benefit. Income before the education-specific
-    labor-market entry age is therefore zero. The x-axis starts at the labor-market
-    entry age for education level 1, or the earliest entry age if education level 1
-    is not available.
+    Income before the education-specific labor-market entry age is zero.
+    The x-axis starts at the labor-market entry age for education level 1
 
     Returns one row per education level and age with:
     - mean_labor_income
@@ -369,9 +290,8 @@ def mean_annual_income_profile(data, income_result, labor_market_entry_df):
     - mean_discounted_expected_hourly_wage
     """
     data_p = preprocess_individual_data(data, require_wage=False)
-    labor_market_entry_df = normalize_labor_market_entry(labor_market_entry_df)
     labor_market_entry = labor_market_entry_df.set_index(MODEL_EDUCATION_COL)["LaborMarketEntry"]
-    alternatives = valid_income_alternatives(labor_market_entry, income_result)
+    alternatives = [1, 2, 3, 4]
     discount_start_age = discount_origin_age(labor_market_entry)
 
     background = build_background_regressors(data_p)
@@ -380,10 +300,10 @@ def mean_annual_income_profile(data, income_result, labor_market_entry_df):
 
     for education_level in alternatives:
         education_level = int(education_level)
-        result = _education_result(education_level, income_result)
+        result = income_result.results_by_education[int(education_level)]
         coef = result.coefficients
         entry_age = int(labor_market_entry.loc[education_level])
-        unemployment = float(UNEMPLOYMENT_RATES.get(education_level, 0.0))
+        unemployment = float(UNEMPLOYMENT_RATES[int(education_level)])
         # Base part for this education-specific wage equation: constant + background.
         # Age and experience are added below because they change by age.
         base_log_wage = np.zeros(n, dtype=float)
@@ -446,11 +366,6 @@ def mean_annual_income_profile(data, income_result, labor_market_entry_df):
         profile.groupby(MODEL_EDUCATION_COL)["mean_discounted_annual_income"].cumsum()
     )
     return profile
-
-
-# Backwards-compatible alias for the vectorized profile builder.
-fast_mean_annual_income_profile = mean_annual_income_profile
-
 
 def _plot_profile_line(profile, y_col, y_label, title, output_path):
     """Internal helper for line plots by education level."""
@@ -516,11 +431,7 @@ def plot_cumulative_mean_discounted_income(profile, output_prefix="income_block"
 def plot_income_block_test(data, income_result, labor_market_entry_df, output_prefix="income_block"):
     """
     Create the two original income-block diagnostic plots.
-
-    This function is backwards compatible with the earlier test code:
-        profile, annual_plot, hourly_plot = plot_income_block_test(...)
-
-    It includes unemployment benefits but not SU. Income before labor-market entry is zero.
+    Income before labor-market entry is zero.
     """
     profile = mean_annual_income_profile(data, income_result, labor_market_entry_df)
     annual_path = plot_mean_discounted_annual_income(profile, output_prefix)

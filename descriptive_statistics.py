@@ -1,27 +1,25 @@
 #%% Imports
 from pathlib import Path
-import numpy as np  
+import numpy as np
 import pandas as pd
 
 
 #%% Load Dataset
-DATA_PATH = Path("../Data/data4_25years.csv")
+DATA_PATH = Path("../Data/data.csv")
 data = pd.read_csv(DATA_PATH)
-print(f"Number of rows: {len(data):,}")
 
 print(f"Number of rows: {len(data):,}")
 print(f"Number of columns: {len(data.columns):,}")
 
 
 #%% Define categorical and excluded columns
-# Categorical columns: koen and every column containing "udd"
-categorical_cols = ["koen"] + [col for col in data.columns if "udd" in col.lower()]
-categorical_cols = [col for col in categorical_cols if col in data.columns]
+# Categorical columns: koen, f_udd, i_udd and e_udd
+categorical_cols = ["koen", "f_udd", "i_udd", "e_udd"]
 
-# Columns that should not be included in descriptive statistics
+# Columns not included in descriptive statistics
 exclude_cols = ["pnr", "induagg", "aar"] + categorical_cols
 
-# All remaining columns are treated as numeric
+# Numeric columns
 numeric_cols = [col for col in data.columns if col not in exclude_cols]
 
 
@@ -29,15 +27,12 @@ numeric_cols = [col for col in data.columns if col not in exclude_cols]
 numeric_data = data[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
 descriptive_statistics = numeric_data.agg(
-    ["min", "median", "mean", "max", "std"]
+    ["mean", "std"]
 ).T
 
 descriptive_statistics = descriptive_statistics.rename(
     columns={
-        "min": "Minimum",
-        "median": "Median",
         "mean": "Mean",
-        "max": "Maximum",
         "std": "Standard deviation",
     }
 )

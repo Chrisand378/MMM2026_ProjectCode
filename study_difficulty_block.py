@@ -49,7 +49,7 @@ def _cutpoints_and_standard_errors(model, result, n_x, cut_names):
     """
     Return actual ordered cutpoints and delta-method standard errors.
 
-    statsmodels estimates transformed threshold parameters. The first threshold
+    Statsmodels estimates transformed threshold parameters. The first threshold
     is estimated directly, while later thresholds are log-increments. This turns
     them into the actual increasing cutpoints used for prediction.
     """
@@ -97,9 +97,6 @@ def estimate_study_difficulty_model(data):
 
     model_data = pd.concat([data[[MODEL_EDUCATION_COL]], x_all], axis=1).dropna().copy()
     categories = sorted(model_data[MODEL_EDUCATION_COL].unique().tolist())
-
-    if len(categories) < 3:
-        raise ValueError("Ordered probit needs at least three observed education levels.")
 
     y = model_data[MODEL_EDUCATION_COL]
     x = model_data[x_all.columns].astype(float)
@@ -152,10 +149,6 @@ def predict_completion_probabilities(data, result):
 
     For ordered education levels, this is the upper-tail probability:
         P(G_i >= g)
-
-    This differs from P(G_i = g). The latter is the probability of ending exactly
-    at level g, while this function measures whether the student can reach at
-    least level g.
     """
     data = preprocess_individual_data(data, require_wage=False)
     x = build_background_regressors(data)

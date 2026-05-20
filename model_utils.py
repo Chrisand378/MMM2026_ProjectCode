@@ -1,6 +1,5 @@
 #%%
 import math
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,21 +12,18 @@ from config import (
     CATEGORICAL_BACKGROUND_COLS,
     EDUCATION_COL,
     EXPERIENCE_COL,
-    FORBIDDEN_MODEL_COLS,
-    ID_COL,
     LOG_BACKGROUND_COLS,
     LOG_BACKGROUND_PREFIX,
     LOG_WAGE_COL,
     MODEL_EDUCATION_COL,
     NUMERIC_BACKGROUND_COLS,
-    TRANSFORMED_EDUCATION_COL,
     WAGE_COL,
 )
 
 
 #%%
 def normal_cdf(x):
-    """Standard normal CDF using only Python/numpy."""
+    """Standard normal CDF"""
     x = np.asarray(x, dtype=float)
     return 0.5 * (1.0 + np.vectorize(math.erf)(x / math.sqrt(2.0)))
 
@@ -52,121 +48,44 @@ def safe_log(values, eps=1e-8):
 
 
 #%%
-def resolve_education_col(data):
-    """Use f_udd_t when available; otherwise use the regular f_udd column."""
-    if TRANSFORMED_EDUCATION_COL in data.columns:
-        return TRANSFORMED_EDUCATION_COL
-    if EDUCATION_COL in data.columns:
-        return EDUCATION_COL
-    raise ValueError(
-        f"Need either '{TRANSFORMED_EDUCATION_COL}' or '{EDUCATION_COL}' in the CSV."
-    )
-
-
-def require_columns(data, columns, context="dataset"):
-    missing = [col for col in columns if col not in data.columns]
-    if missing:
-        raise ValueError(f"Missing required columns in {context}: {missing}")
-
-
-def _coerce_education_values(values):
-    numeric = pd.to_numeric(values, errors="coerce")
-    if numeric.notna().all():
-        return numeric.astype(int)
-    return values
-
-
 def preprocess_individual_data(data, require_wage=False):
-    """
-    Apply project-wide dataset rules.
-
-    The raw education column is copied to MODEL_EDUCATION_COL so downstream code
-    can use one name whether the source dataset uses f_udd or f_udd_t.
-    """
+    """Apply project-wide dataset rules."""
     data = data.copy()
 
-    if "i_udd" in data.columns:
-        data = data.drop(columns=["i_udd"])
-
-    education_col = resolve_education_col(data)
-    data[MODEL_EDUCATION_COL] = _coerce_education_values(data[education_col])
+    data[MODEL_EDUCATION_COL] = pd.to_numeric(data[EDUCATION_COL]).astype(int)
 
     if require_wage:
-        require_columns(data, [WAGE_COL], "income data")
         wage = pd.to_numeric(data[WAGE_COL], errors="coerce")
         data[LOG_WAGE_COL] = np.nan
         data.loc[wage > 0, LOG_WAGE_COL] = np.log(wage.loc[wage > 0])
 
     for col in [AGE_COL, EXPERIENCE_COL] + NUMERIC_BACKGROUND_COLS + LOG_BACKGROUND_COLS:
-        if col in data.columns:
-            data[col] = pd.to_numeric(data[col], errors="coerce")
+        data[col] = pd.to_numeric(data[col], errors="coerce")
 
     for col in LOG_BACKGROUND_COLS:
-        if col in data.columns:
-            data[f"{LOG_BACKGROUND_PREFIX}{col}"] = np.log1p(data[col].clip(lower=0))
+        data[f"{LOG_BACKGROUND_PREFIX}{col}"] = np.log1p(data[col].clip(lower=0))
 
     return data
 
 
-def normalize_labor_market_entry(data):
-    """Standardize the labor-market-entry education column."""
-    data = data.copy()
-    candidates = [MODEL_EDUCATION_COL, EDUCATION_COL, TRANSFORMED_EDUCATION_COL, "F_udd"]
-    education_col = next((col for col in candidates if col in data.columns), None)
-    if education_col is None:
-        raise ValueError("Labor-market-entry data needs an education column.")
-    if "LaborMarketEntry" not in data.columns:
-        raise ValueError("Labor-market-entry data needs 'LaborMarketEntry'.")
-    data[MODEL_EDUCATION_COL] = _coerce_education_values(data[education_col])
-    return data[[MODEL_EDUCATION_COL, "LaborMarketEntry"]]
-
-
 def build_background_regressors(data):
-    """Build background controls with project-specific encoding."""
-    require_columns(
-        data,
-        CATEGORICAL_BACKGROUND_COLS + NUMERIC_BACKGROUND_COLS + LOG_BACKGROUND_COLS,
-        "background controls",
-    )
-    parts = []
-
-    numeric_cols = [col for col in NUMERIC_BACKGROUND_COLS if col in data.columns]
-    log_cols = [
-        f"{LOG_BACKGROUND_PREFIX}{col}"
-        for col in LOG_BACKGROUND_COLS
-        if f"{LOG_BACKGROUND_PREFIX}{col}" in data.columns
+    """Build background controls."""
+    numeric_cols = NUMERIC_BACKGROUND_COLS + [
+        f"{LOG_BACKGROUND_PREFIX}{col}" for col in LOG_BACKGROUND_COLS
     ]
-    if numeric_cols or log_cols:
-        parts.append(data[numeric_cols + log_cols].astype(float))
+
+    parts = [data[numeric_cols].astype(float)]
 
     for col in CATEGORICAL_BACKGROUND_COLS:
-        if col in data.columns:
-            dummies = pd.get_dummies(
-                data[col].astype("category"),
-                prefix=col,
-                drop_first=True,
-                dtype=float,
-            )
-            parts.append(dummies)
+        dummies = pd.get_dummies(
+            data[col].astype("category"),
+            prefix=col,
+            drop_first=True,
+            dtype=float,
+        )
+        parts.append(dummies)
 
-    if not parts:
-        raise ValueError("No configured background columns were found in the CSV.")
-
-    x = pd.concat(parts, axis=1)
-    assert_no_forbidden_regressors(x.columns)
-    return x
-
-
-def assert_no_forbidden_regressors(columns):
-    """Fail fast if an excluded variable slips into a model matrix."""
-    forbidden = set(FORBIDDEN_MODEL_COLS)
-    used = []
-    for col in columns:
-        base = str(col).removeprefix(LOG_BACKGROUND_PREFIX)
-        if str(col) in forbidden or base in forbidden:
-            used.append(str(col))
-    if used:
-        raise ValueError(f"Forbidden variables used as regressors: {used}")
+    return pd.concat(parts, axis=1)
 
 
 #%%
@@ -284,92 +203,6 @@ def fit_ols(y, x):
         residuals=pd.Series(resid),
     )
 
-
-#%%
-def numeric_gradient(func, params, step=1e-5):
-    grad = np.zeros_like(params, dtype=float)
-    for idx in range(len(params)):
-        delta = np.zeros_like(params, dtype=float)
-        delta[idx] = step
-        grad[idx] = (func(params + delta) - func(params - delta)) / (2 * step)
-    return grad
-
-
-def numeric_hessian(func, params, step=1e-4):
-    params = np.asarray(params, dtype=float)
-    n_params = len(params)
-    hessian = np.zeros((n_params, n_params), dtype=float)
-    for i in range(n_params):
-        for j in range(n_params):
-            ei = np.zeros(n_params)
-            ej = np.zeros(n_params)
-            ei[i] = step
-            ej[j] = step
-            hessian[i, j] = (
-                func(params + ei + ej)
-                - func(params + ei - ej)
-                - func(params - ei + ej)
-                + func(params - ei - ej)
-            ) / (4 * step * step)
-    return hessian
-
-
-@dataclass
-class OptimizerResult:
-    params: np.ndarray
-    inverse_hessian: np.ndarray
-    objective: float
-    converged: bool
-    iterations: int
-
-
-def minimize_bfgs(func, start_params, max_iter=500, tol=1e-6):
-    """Small BFGS optimizer so the project code only depends on numpy/pandas."""
-    params = np.asarray(start_params, dtype=float)
-    n_params = len(params)
-    inv_hessian = np.eye(n_params)
-    value = float(func(params))
-
-    for iteration in range(1, max_iter + 1):
-        grad = numeric_gradient(func, params)
-        if np.linalg.norm(grad, ord=np.inf) < tol:
-            return OptimizerResult(params, inv_hessian, value, True, iteration)
-
-        direction = -inv_hessian @ grad
-        step = 1.0
-        accepted = False
-
-        for _ in range(30):
-            candidate = params + step * direction
-            candidate_value = float(func(candidate))
-            if np.isfinite(candidate_value) and candidate_value < value:
-                accepted = True
-                break
-            step *= 0.5
-
-        if not accepted:
-            warnings.warn("BFGS line search stopped before finding an improving step.")
-            return OptimizerResult(params, inv_hessian, value, False, iteration)
-
-        new_grad = numeric_gradient(func, candidate)
-        s = candidate - params
-        y = new_grad - grad
-        ys = float(y @ s)
-
-        if ys > 1e-12:
-            rho = 1.0 / ys
-            ident = np.eye(n_params)
-            inv_hessian = (ident - rho * np.outer(s, y)) @ inv_hessian @ (
-                ident - rho * np.outer(y, s)
-            ) + rho * np.outer(s, s)
-
-        params = candidate
-        value = candidate_value
-
-        if np.linalg.norm(s, ord=np.inf) < tol:
-            return OptimizerResult(params, inv_hessian, value, True, iteration)
-
-    return OptimizerResult(params, inv_hessian, value, False, max_iter)
 
 
 #%%
